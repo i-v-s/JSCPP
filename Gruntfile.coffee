@@ -1,6 +1,6 @@
 module.exports = (grunt) ->
   require("load-grunt-tasks")(grunt)
-  grunt.registerTask "build", "to build", ["clean", "copy", "coffee", "peg", "dist"]
+  grunt.registerTask "build", "to build", ["clean", "copy", "peg", "dist"]
   grunt.registerTask "dist", "to make distribution version", ["browserify", "shell", "concat", "uglify"]
   grunt.registerTask "default", "to watch & compile", ["build", "watch"]
   grunt.registerTask "test", "to test", ["mochaTest"]
@@ -18,24 +18,6 @@ module.exports = (grunt) ->
     clean:
       build:
         src: ["lib", "dist"]
-
-    coffee:
-      build:
-        options:
-          bare: true
-        files: [
-            expand: true
-            cwd: "src"
-            src: ["**/*.coffee"]
-            dest: "lib"
-            ext: ".js"
-          ,
-            expand: true
-            cwd: "demo"
-            src: ["**/*.coffee"]
-            dest: "demo"
-            ext: ".js"
-        ]
 
     browserify:
       dist:
@@ -76,9 +58,6 @@ module.exports = (grunt) ->
         expand: true
 
     watch:
-      coffee:
-        files: ["src/**/*.coffee", "test/test.coffee", "demo/**/*.coffee", "*.coffee", "!Gruntfile.coffee"]
-        tasks: ["newer:coffee"]
       peg:
         files: "pegjs/**/*.pegjs"
         tasks: ["newer:peg"]
