@@ -15,6 +15,17 @@
         ptrOrder : function() { return this.p || 0; },
         js       : function() { return this.j || this.c; },
         isConst  : function() { return typeof this.c !== 'undefined'; },
+        init     : function(v) {
+            if (typeof v === 'string') { // Создаём переменную с заданным именем
+                this.j = v;
+                this.n = v;
+            } else if (v instanceof Type) {
+                this.from(v);
+            } else {
+                if (typeof v.c !== 'undefined') this.c = v.c; // нативное значение
+                if (typeof v.j === 'string')    this.j = v.j; // значение из выражения js
+            }
+        },
         from     : function(v) {
             if (typeof this.cvt !== 'function')
                 return error('Method cvt() not defined for type ' + this.typeName());
@@ -45,6 +56,9 @@
         }
     };
     /////// Скалярные типы
+    function Bool() {}
+    Bool.prototype = new Type();
+
     function Integer(width, signed) { this.w = width; this.s = signed; }
     Integer.prototype = new Type();
     Integer.prototype.cvt = function(from) {
@@ -64,6 +78,9 @@
         };
         error('Operator \'' + op + '\' wrong types.');
     }
+    ////// Классы
+    //function Class()
+    //{n : cd.n, t : cd.t, v : data.v}
     ////// Function type
 
     function Func(type, name, args) {
@@ -122,19 +139,18 @@
             return error("Type '" + name + "' redeclared.");
 
         var type = function(v) { // Конструктор значений
-            if (typeof v === 'string') { // Создаём переменную с заданным именем
-                this.j = v;
-                this.n = v;
-            } else if (v instanceof Type) {
-                this.from(v);
-            } else {
-                if (typeof v.c !== 'undefined') this.c = v.c; // нативное значение
-                if (typeof v.j === 'string')    this.j = v.j; // значение из выражения js
-            }
+            this.init(v);
         };
         proto.tn = name;
         type.prototype = proto;
         types[name] = type;
+    }
+    function modifyType(type, modifiers) {
+        var proto = Object.create(type.prototype);
+        var newType = function(v) { this.init(v); };
+        proto.tn = type.prototype.tn;
+        newType.prototype = proto;
+        return newType;
     }
     
     // Types: 
@@ -143,13 +159,21 @@
     //   w - width, bytes
     //   s - signed, bool
     //   v - member vars
-    defineType('void',   new Type());
-    defineType('char',   new Integer(1, true));
-    defineType('int',    new Integer(4, true));
-    defineType('long',   new Integer(4, true));
-    defineType('float',  new Float(4));
-    defineType('double', new Float(8));
+    (function builtinTypes() {
+        defineType('void',   new Type());
+        defineType('bool',   new Bool());
+        var ispec = ['', 'signed ', 'unsigned'];
+        for (var x = 0; x < 3; x++) {
+            var is = ispec[x], s = x < 3;
+            defineType(is + 'char' , new Integer(1, s));
+            defineType(is + 'short', new Integer(2, s));
+            defineType(is + 'int'  , new Integer(4, s));
+            defineType(is + 'long' , new Integer(4, s));
+        }
 
+        defineType('float',  new Float(4));
+        defineType('double', new Float(8));
+    })();
     function findVar(name) {
         for (var x = stack.length - 1; x >= 0; x--)
             if (typeof stack[x].v[name] !== 'undefined')
@@ -198,13 +222,19 @@ UnitItem = Function / FunctionPrototype / DeclarationStatement / TypedefStatemen
 
 Namespace = NamespaceHead i:UnitItem* "}" ws {
     stack.pop();
+    return { j : i.map(function(i){ return i.j; }).join('\n') };
 }
 
 NamespaceHead = "namespace" ws n:Identifier ws "{" ws {
-    var ns = new Namespace(n);
-    declVar(ns);
-    begin();
-    ns.v = stack[stack.length - 1];
+    var top = stack[stack.length - 1];
+    var ns = top[n];
+    if (ns) {
+        stack.push(ns.v);
+    } else {
+        top[n] = ns = new Namespace(n);
+        begin();
+        ns.v = stack[stack.length - 1];
+    }
 }
 
 ////////// Functions
@@ -234,7 +264,8 @@ FunctionStart = h:FunctionHead "{" ws {
     return h;
 }
 
-FunctionHead = t:Type n:Identifier "(" ws a:ArgumentList? ")" ws { return new Func(t, n, a || []); }
+FunctionHead = s:FunctionSpecifier? t:Type n:Identifier "(" ws a:ArgumentList? ")" ws { return new Func(t, n, a || [], s); }
+    FunctionSpecifier = "inline" ws { return 'i'; }
 
 ArgumentList = a1:Argument a:COMMAArgument* { return [a1].concat(a); }
 
@@ -340,16 +371,22 @@ ClassStatement = c:ClassDef d:DeclarationList? ";" ws { return {j : c + (d || ''
         }
 
         ClassMember = MemberConstructorProto / MemberConstructorDef / MemberDestructorProto / MemberDestructorDef 
-            / ClassSection / MemberDeclarationStatement ;
+            / MemberMethodDef / MemberMethodProto / ClassSection / MemberDeclarationStatement ;
 
             MemberDestructorProto  = "~" ws a:MemberConstructorHead ";" ws ;
             MemberConstructorProto = a:MemberConstructorHead ";" ws ;
+            MemberMethodProto      = MethodHead CONST? ";" ws ;
+            
             MemberDestructorDef    = "~" ws a:MemberConstructorHead c:$CodeBlockStub { console.log('mdd:', a, c); }            
             MemberConstructorDef   = a:MemberConstructorHead i:ConstructorInits? c:$CodeBlockStub { console.log('mcd:', a, i, c); }
                 MemberConstructorHead = t:Identifier &{ return t === className; } "(" ws a:ArgumentList? ")" ws { return a; }
                 ConstructorInits = ":" ws i:ConstructorInit a:COMMAConstructorInit* { return [i].concat(a); }
                     ConstructorInit = m:Identifier "(" ws e:Expression ")" ws { return { m : m, e : e}; }
                     COMMAConstructorInit = "," ws i:ConstructorInit { return i; }
+
+            MemberMethodDef = h:MethodHead c:CONST? b:$CodeBlockStub { console.log(h, b); }
+                MethodHead = s:MethodSpecifier? t:Type n:Identifier "(" ws a:ArgumentList? ")" ws { return new Func(t, n, a || [], s); }
+                    MethodSpecifier = FunctionSpecifier / "virtual" ws { return 'v'; } / "static" ws { return 's'; }
 
             ClassSection = s:(PRIVATE / PROTECTED / PUBLIC) ":" ws { stack[stack.length - 1].s = s; }
                 PRIVATE   = "private"   ws { return 'pri'; }
@@ -365,13 +402,25 @@ TypedefList = n:TypedefName l:COMMATypedefName* { return n + l.join(); }
     COMMATypedefName = COMMA n:TypedefName {return n}
     TypedefName = n:Identifier { defineType(n, declType); }
 
-Type = VOID / INT / LONG / FLOAT / DOUBLE / UserType;
+Type = c1:TypeSpec* t:(VOID / BOOL / Integer / FLOAT / DOUBLE / UserType) c2:TypeSpec* { return modifyType(t, c1.concat(c2)); }
 
-VOID    = a:"void"   ws { return types0['void'  ]; }
-LONG    = a:"long"   ws { return types0['long'  ]; }
-INT     = a:"int"    ws { return types0['int'   ]; }
-FLOAT   = a:"float"  ws { return types0['float' ]; }
-DOUBLE  = a:"double" ws { return types0['double']; }
+TypeSpec = CONST / VOLATILE ;
+
+VOID    = "void"   ws { return types0['void'  ]; }
+BOOL    = "bool"   ws { return types0['bool'  ]; }
+
+FLOAT   = "float"  ws { return types0['float' ]; }
+DOUBLE  = "double" ws { return types0['double']; }
+
+Integer = s:SignSpec? t:(CHAR / SHORT / LONG / INT) { return types0[s ? s + ' ' + t : t]; }
+CHAR    = a:"char"   ws { return a; }
+SHORT   = a:"short"  ws { return a; }
+LONG    = a:"long"   ws { return a; }
+INT     = a:"int"    ws { return a; }
+
+SignSpec = SIGNED / UNSIGNED ;
+SIGNED   = a:"signed"   ws { return a; }
+UNSIGNED = a:"unsigned" ws { return al }
 
 UserType = i:Identifier &{ return userType = findType(i); } { return userType; }
 
@@ -418,7 +467,9 @@ CharConst = "'" s:NotSQ* "'" { return s.join(''); }
 
 ////////// Keywords
 
-TYPEDEF = "typedef" ws ;
+TYPEDEF  = "typedef"  ws ;
+CONST    = a:"const"    ws { return a; }
+VOLATILE = a:"volatile" ws { return a; }
 
 Keyword = ( "auto" / "break" / "case" / "char" / "const" / "continue" / "default" / "double" / "do" / "else" / "enum" / "extern" / "float"
       / "for" / "goto" / "if" / "int" / "inline" / "long" / "register" / "restrict" / "return" / "short" / "signed" / "sizeof" / "static"
