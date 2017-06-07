@@ -1,16 +1,22 @@
 {
     var defs = options.defs || Object.create(null), incLoc = options.incLoc || Object.create(null), incLib = options.incLib || Object.create(null);
-    var absent = false, en = true, stack = [];
+    var en = true, stack = [], handler = options.handler || function() {};
     function include(file, lib) {
         var inc = (lib ? incLib : incLoc)[file];
-        if (inc) return peg$parse(inc, { incLoc : incLoc, incLib : incLib });
+
+        if (typeof inc === 'string') try { 
+            return peg$parse(inc, { defs : defs, incLoc : incLoc, incLib : incLib }).result;
+        } catch(e) {
+            handler(file, inc, e);
+            return error('Included here.');
+        }
         (lib ? incLib : incLoc)[file] = null;
-        absent = true;
+        //absent = true;
         return lib ? ('//[<' + file + '>]') : ('//["' + file + '"]');
     }
     function getAbsent(inc) {
         var r = [];
-        if (absent) for (var fn in inc) if (inc[fn] === null) r.push(fn);
+        for (var fn in inc) if (inc[fn] === null) r.push(fn);
         return r;
     }
     function push(e) {
@@ -83,9 +89,7 @@ CodeItem = !"\n" i:(LineComment / LongComment / LineAdd / String / Char / Macro 
 
 LineAdd = "\\" is "\n" { return ''; }
 
-
 ////////// Code
-
 
 Macro = i:Identifier "(" w1:ws c:Code a:("," ws Code)* ")" w2:ws {
     if (defs[i] && defs[i].a) {
@@ -128,7 +132,7 @@ Keyword = ( "auto" / "break" / "case" / "char" / "const" / "continue" / "default
 //////// Comments and spaces 
 
 ws = a:(WhiteSpace       / LongComment / LineComment)* { return a.join(''); }
-is = a:(InlineWhiteSpace / LongComment)*               { return a.join(''); }
+is = a:(InlineWhiteSpace / LongComment / LineComment)* { return a.join(''); }
 
 LongComment = "/*" a:(!"*/" .)* "*/" { return ''; }
 LineComment = "//" a:nn*      { return ''; }

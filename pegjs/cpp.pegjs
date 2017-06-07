@@ -1,6 +1,6 @@
 {
     /////// Состояние
-    var stack = [], global = Object.create(null), declType = undefined, returnType = undefined;
+    var stack = [], global = Object.create(null), declType, returnType, userType, className;
 
     function findType(name) {
         for (var x = stack.length - 1; x >= 0; x--)
@@ -97,17 +97,19 @@
         this.f = [];
     }
 
-
+    function Namespace(name) {
+        this.n = name;
+    }
     //FuncSet.prototype.
 
-    function codeStart(section) {
+    function begin(section) {
         stack.push({ 
             v : Object.create(null),
             t : Object.create(null),
             s : section
         });
     }
-    codeStart();
+    begin();
 
     /////// Словарь типов
     var types0 = stack[0].t;
@@ -144,6 +146,7 @@
     defineType('void',   new Type());
     defineType('char',   new Integer(1, true));
     defineType('int',    new Integer(4, true));
+    defineType('long',   new Integer(4, true));
     defineType('float',  new Float(4));
     defineType('double', new Float(8));
 
@@ -189,7 +192,20 @@ Unit = ws i:UnitItem* {
     return r.join('\n');
 }
 
-UnitItem = Function / FunctionPrototype / DeclarationStatement / TypedefStatement / ClassStatement ;
+UnitItem = Function / FunctionPrototype / DeclarationStatement / TypedefStatement / ClassStatement / Namespace;
+
+////////// Namespaces
+
+Namespace = NamespaceHead i:UnitItem* "}" ws {
+    stack.pop();
+}
+
+NamespaceHead = "namespace" ws n:Identifier ws "{" ws {
+    var ns = new Namespace(n);
+    declVar(ns);
+    begin();
+    ns.v = stack[stack.length - 1];
+}
 
 ////////// Functions
 
@@ -210,7 +226,7 @@ Function = h:FunctionStart c:CodeBlockBody {
 
 FunctionStart = h:FunctionHead "{" ws {
     returnType = h.t;
-    codeStart();
+    begin();
     if (h.a) for (var x in h.a) {
         var a = h.a[x];
         declVar(a.n, a.t);
@@ -241,7 +257,10 @@ CodeBlockBody = c:Statement* "}" ws {
     return { d : varNames, j : (js !== '') ? '{' + js + '}' : '' }; 
 }
 
-CodeBlockStart = "{" ws { codeStart(); }
+CodeBlockStub = "{" ws CBSItem* "}" ws ;
+    CBSItem = CodeBlockStub / CharConst / StringConst / (!"}" .)
+
+CodeBlockStart = "{" ws { begin(); }
 
 Statement = DeclarationStatement / CodeBlock / ExpressionStatement / TypedefStatement / ClassStatement / ReturnStatement ;
 
@@ -307,27 +326,35 @@ Variable = n:Identifier { var v = findVar(n); if (v) return v; else error("Undec
 
 ClassStatement = c:ClassDef d:DeclarationList? ";" ws { return {j : c + (d || '')}; };
 
-ClassDef 
-    = cd:ClassDefStart ClassMember* "}" ws {
-            var data = stack.pop();
-            var type = {n : cd.n, t : cd.t, v : data.v};
-            defineType(type.n, type);
-            return 'function ' + type.n + '(){}';
+    ClassDef = cd:ClassDefStart ClassMember* "}" ws {
+        var data = stack.pop();
+        var type = {n : cd.n, t : cd.t, v : data.v};
+        defineType(type.n, type);
+        return 'function ' + type.n + '(){}';
+    }
+
+        ClassDefStart = t:("class" / "struct") ws n:Identifier "{" ws {
+            begin((t === 'class') ? 'pri' : 'pub');
+            className = n;
+            return { t : t[0], n : n};
         }
 
-ClassMember = ClassSection / MemberDeclarationStatement ;
+        ClassMember = MemberConstructorProto / MemberConstructorDef / MemberDestructorProto / MemberDestructorDef 
+            / ClassSection / MemberDeclarationStatement ;
 
-ClassSection = s:(PRIVATE / PROTECTED / PUBLIC) ":" ws { stack[l - 1].s = s; }
+            MemberDestructorProto  = "~" ws a:MemberConstructorHead ";" ws ;
+            MemberConstructorProto = a:MemberConstructorHead ";" ws ;
+            MemberDestructorDef    = "~" ws a:MemberConstructorHead c:$CodeBlockStub { console.log('mdd:', a, c); }            
+            MemberConstructorDef   = a:MemberConstructorHead i:ConstructorInits? c:$CodeBlockStub { console.log('mcd:', a, i, c); }
+                MemberConstructorHead = t:Identifier &{ return t === className; } "(" ws a:ArgumentList? ")" ws { return a; }
+                ConstructorInits = ":" ws i:ConstructorInit a:COMMAConstructorInit* { return [i].concat(a); }
+                    ConstructorInit = m:Identifier "(" ws e:Expression ")" ws { return { m : m, e : e}; }
+                    COMMAConstructorInit = "," ws i:ConstructorInit { return i; }
 
-PRIVATE   = "private"   ws { return 'pri'; }
-PROTECTED = "protected" ws { return 'pro'; }
-PUBLIC    = "public"    ws { return 'pub'; }
-
-ClassDefStart
-    = t:("class" / "struct") ws n:Identifier "{" ws {
-        codeStart((t === 'class') ? 'pri' : 'pub');
-        return { t : t[0], n : n};
-    }
+            ClassSection = s:(PRIVATE / PROTECTED / PUBLIC) ":" ws { stack[stack.length - 1].s = s; }
+                PRIVATE   = "private"   ws { return 'pri'; }
+                PROTECTED = "protected" ws { return 'pro'; }
+                PUBLIC    = "public"    ws { return 'pub'; }
 
 ////////// Types
 
@@ -338,18 +365,56 @@ TypedefList = n:TypedefName l:COMMATypedefName* { return n + l.join(); }
     COMMATypedefName = COMMA n:TypedefName {return n}
     TypedefName = n:Identifier { defineType(n, declType); }
 
-Type = VOID / INT / FLOAT ;
+Type = VOID / INT / LONG / FLOAT / DOUBLE / UserType;
 
-VOID    = a:"void"  ws {return types0['void' ]; }
-INT     = a:"int"   ws {return types0['int'  ]; }
-FLOAT   = a:"float" ws {return types0['float']; }
+VOID    = a:"void"   ws { return types0['void'  ]; }
+LONG    = a:"long"   ws { return types0['long'  ]; }
+INT     = a:"int"    ws { return types0['int'   ]; }
+FLOAT   = a:"float"  ws { return types0['float' ]; }
+DOUBLE  = a:"double" ws { return types0['double']; }
 
-////////// Constants
+UserType = i:Identifier &{ return userType = findType(i); } { return userType; }
 
-Const = DecimalConst / OctalConst
+////////// Literals
+
+Const = FloatConst / DecimalConst / OctalConst ;
 
 DecimalConst = a:[1-9] b:[0-9]* { return new types0['int']({ c: parseInt(  a + b.join(''))}); }
 OctalConst   =     "0" a:[0-7]* { return new types0['int']({ c: parseInt('0' + a.join(''), 8)}); }
+FloatConst   = a:(DecimalFloatConstant) s:FloatSuffix? {
+    return new types0['double']({ c : parseFloat(a)});
+}
+    DecimalFloatConstant = a:Fraction b:Exponent? { return a + b || ''; }
+    / a:[0-9]+ b:Exponent { return a.join('') + b ; }
+    ;
+
+/*HexFloatConstant
+    = a:HexPrefix b:HexFraction c:BinaryExponent? {return addPositionInfo({type:'HexFloatConstant', value:a+b+c||''});}
+    / a:HexPrefix b:HexDigit+ c:BinaryExponent {return addPositionInfo({type:'HexFloatConstant', value:a+b.join('')+c});}
+    ;*/
+
+Fraction
+    = a:[0-9]* "." b:[0-9]+ { return a.join('')+'.'+b.join('');}
+    / a:[0-9]+ "." {return a.join('');}
+    ;
+
+/*HexFraction
+    = a:HexDigit* "." b:HexDigit+ {return a.join('')+'.'+b.join('');}
+    / a:HexDigit+ "." {return a.join('')+'.';}
+    ;*/
+
+    Exponent = a:[eE] b:[+\-]? c:[0-9]+ { return a + (b || "") + c.join(''); };
+
+//BinaryExponent = a:[pP][+\-]? b:[0-9]+ {return a+b.join('');};
+
+
+FloatSuffix = a:[flFL] ws {return a;}
+
+StringConst = '"' s:NotDQ* '"' { return s.join(''); }
+    NotDQ = !'"' s:(BS / .) {return s; }
+CharConst = "'" s:NotSQ* "'" { return s.join(''); }
+    NotSQ = !'\'' s:(BS / .) { return s; }
+        BS = bs:("\\" .) { return bs.join(''); }
 
 ////////// Keywords
 
