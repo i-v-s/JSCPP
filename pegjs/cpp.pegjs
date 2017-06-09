@@ -3,7 +3,7 @@
     var stack = [], global = Object.create(null), declType, returnType, userType = [], className;
 
     function findType(names) {
-        console.log('findType:', names);
+        //console.log('findType:', names);
         var name = names[0], i = 0;
         for (var x = stack.length - 1; x >= 0; x--) {
             var scope = stack[x], type = scope[name];
@@ -16,11 +16,11 @@
                     else return error('Not a type: ' + names.join('::'));
                 }
                 if (!(type instanceof Template) && (typeof type !== 'function' || !(type.prototype instanceof Type))) error('Not a type: ' + names.join('::'));
-                console.log('found:', type);
+                //console.log('found:', type);
                 return type;
             }
         }
-        console.log('Not found.');
+        //console.log('Not found.');
     }
 
     //////// Корневой класс для всех типов
@@ -106,16 +106,19 @@
     function Template(params) {
         this.b = params.body;
         this.a = params.args;
+        this.n = params.name;
     }
     Template.prototype.inst = function(args) {
-        console.log('inst:', this.p, args);
-        var body = this.b;
+        console.log('inst:', this.n, args.map(a => a.prototype.tn));
+        var body = this.b, imp;
+        begin();
         try { 
-            return peg$parse(body, { handler : options.handler, startRule : "ClassDef" });
+            imp = peg$parse(body, { handler : options.handler, startRule : "ClassDef" });
         } catch(e) {
-            handler('', body, e);
+            options.handler('', body, e);
             return error('Instantiated here.');
         }
+        var r = stack.pop();
     }
 
     ////// Function type
@@ -397,7 +400,7 @@ ClassTemplateStatement = a:ClassTemplateHead h:ClassHead b:$CodeBlockStub d:Decl
     top[h.n] = new Template({
         name : h.n,
         args : a,
-        body : h.t + ' ' + h.n + ' ' + b + ';'
+        body : h.t + ' ' + h.n + ' ' + b
     });
     return { j : '' };
 }
@@ -444,7 +447,7 @@ ClassStatement = c:ClassDef d:DeclarationList? ";" ws { return { j : c + (d || '
                 MethodHead = s:MethodSpecifier? t:Type n:Identifier "(" ws a:ArgumentList? ")" ws { return new Func(t, n, a || [], s); }
                     MethodSpecifier = FunctionSpecifier / "virtual" ws { return 'v'; } / "static" ws { return 's'; }
 
-            ClassSection = s:(PRIVATE / PROTECTED / PUBLIC) ":" ws { stack[stack.length - 1].s = s; }
+            ClassSection = s:(PRIVATE / PROTECTED / PUBLIC) ":" ws { stack[stack.length - 1].$s = s; }
                 PRIVATE   = "private"   ws { return 'pri'; }
                 PROTECTED = "protected" ws { return 'pro'; }
                 PUBLIC    = "public"    ws { return 'pub'; }
