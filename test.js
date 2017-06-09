@@ -97,7 +97,7 @@ var cpp = fs.readFileSync(fn, 'utf8');
 
 preprocessor(cpp, fn, { incLib : libs }).then(cpp => {
     console.log(cpp);
-    var code = parse(cpp, fn, parser);
+    var code = parse(cpp, fn, parser, { handler : handler });
     console.log(code);
 });
 

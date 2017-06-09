@@ -3,10 +3,23 @@ var libs = Object.create(null);
 module.exports = libs;
 
 libs['chrono'              ] = '';
-libs['string'              ] = '';
+libs['string'              ] = '\
+#ifndef _STRING_ \n\
+#define _STRING_ \n\
+namespace std { \n\
+class string {}; \n\
+}\n\
+#endif';
 libs['vector'              ] = '';
 libs['list'                ] = '';
-libs['map'                 ] = '';
+libs['map'                 ] = '\
+#ifndef _MAP_ \n\
+#define _MAP_ \n\
+namespace std { \n\
+template<typename Key, typename Value> \n\
+class map {}; \n\
+}\n\
+#endif';
 libs['iostream'            ] = '';
 libs['fstream'             ] = '';
 
