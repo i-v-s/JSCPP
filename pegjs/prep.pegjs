@@ -1,6 +1,6 @@
 {
     var defs = options.defs || Object.create(null), incLoc = options.incLoc || Object.create(null), incLib = options.incLib || Object.create(null);
-    var en = true, stack = [], handler = options.handler || function() {};
+    var en = true, stack = [], handler = options.handler || function() {}, def;
     function include(file, lib) {
         var inc = (lib ? incLib : incLoc)[file];
 
@@ -85,20 +85,25 @@ Const = DecimalConst / OctalConst ;
 
 CodeLine = s:is !"#" i:CodeItem* { return s + i.join(''); }
 
-CodeItem = !"\n" i:(LineComment / LongComment / LineAdd / String / Char / Macro / nn) { return i; }
+CodeItem = !"\n" i:(LineComment / LongComment / LineAdd / String / Char / DefConst / nn) { return i; }
 
 LineAdd = "\\" is "\n" { return ''; }
 
 ////////// Code
 
-Macro = i:Identifier "(" w1:ws c:Code a:("," ws Code)* ")" w2:ws {
+DefConst = d:Def &{ return !d.a; } { return d.v; }
+
+/*DefFunc  = d:Def &{ return d.a; } "(" ws c:Code a:("," ws Code)* ")" w2:ws {
     if (defs[i] && defs[i].a) {
         console.log();
     } else
         return i + '(' + w1 + c + a.join('') + ')' + w2;
-}
+}*/
 
-Code = Macro / String / Char ;
+CodeBlock = "(" s1:ws i:CBItem* ")" s2:ws { return s1 + i.join('') + s2; }
+    CBItem = CodeBlock / Char / String / DefConst / /*DefFunc /*/ (!")" .)
+
+Def = i:Identifier &{ return def = defs[i]; } { return def; }
 
 ////////// Strings
 
