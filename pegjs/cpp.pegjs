@@ -1,251 +1,279 @@
 {
-    /////// Состояние
-    var stack = [], global = Object.create(null), declType, returnType, userType = [], className;
-
-    function findType(names) {
-        //console.log('findType:', names);
-        var name = names[0], i = 0;
-        for (var x = stack.length - 1; x >= 0; x--) {
-            var scope = stack[x], type = scope[name];
-            if (type) {
-                while (++i < names.length) {
-                    name = names[i];
-                    if (type instanceof Namespace) type = type.v[name];
-                    //else if (type instanceof Template) type = type
-                    else if (typeof type === 'function' && type.prototype instanceof Class) type = type.v[name];
-                    else return error('Not a type: ' + names.join('::'));
+    function initialize() {
+        function createStack() {
+            var stack = [];
+            stack.top = function() { return this[this.length - 1]; };
+            stack.unique = 0;
+            stack.find = function(name) {
+                for (var x = this.length - 1; x >= 0; x--) {
+                    var item = this[x][name];
+                    if (item) return item;
                 }
-                if (!(type instanceof Template) && (typeof type !== 'function' || !(type.prototype instanceof Type))) error('Not a type: ' + names.join('::'));
-                //console.log('found:', type);
-                return type;
-            }
-        }
-        //console.log('Not found.');
-    }
-
-    //////// Корневой класс для всех типов
-    function Type() { }
-    Type.prototype = {
-        typeName : function() { return this.tn; },
-        ptrOrder : function() { return this.p || 0; },
-        js       : function() { return this.j || this.c; },
-        isConst  : function() { return typeof this.c !== 'undefined'; },
-        init     : function(v, options) {
-            if (typeof v === 'string') { // Создаём переменную с заданным именем
-                this.j = v;
-                this.n = v;
-            } else if (v instanceof Type) {
-                this.from(v);
-            } else {
-                if (typeof v.c !== 'undefined') this.c = v.c; // нативное значение
-                if (typeof v.j === 'string')    this.j = v.j; // значение из выражения js
-            }
-        },
-        from     : function(v) {
-            if (typeof this.cvt !== 'function')
-                return error('Method cvt() not defined for type ' + this.typeName());
-            var f = this.cvt(v);
-            if (f === null) {
-                if (v.isConst()) this.c = v.c; else this.j = v.j;
-                return;
-            }
-            if (typeof f !== 'function')
-                return error('Unable to convert \'' + v.typeName() + '\' to \'' + this.typeName() + '\': method undefined');
-            if (v.isConst())
-                this.c = Function('$', f('$'))(v.c);
-            else
-                this.j = f(v.j);
-        },
-        // бинарные операторы
-        bi : function(op, v2) {
-            if (typeof this._bi !== 'function')
-                return error('Method _bi() not defined for type ' + this.typeName());
-            var b = this._bi(op, v2), type = findType([b.t]);
-            if (this.isConst() && v2.isConst()) {
-                var c = Function('$1', '$2', b.f('$1', '$2'))(this.c, v2.c);
-                return new type({ c : c });
-            } else {
-                var j = b.f(this.js(), v2.js());
-                return new type({ j : j });
-            }
-        }
-    };
-    /////// Скалярные типы
-    function Bool() {}
-    Bool.prototype = new Type();
-
-    function Integer(width, signed) { this.w = width; this.s = signed; }
-    Integer.prototype = new Type();
-    Integer.prototype.cvt = function(from) {
-        if (from instanceof Float) return function(a) { return '(' + a + '|0)'; }
-        if (from instanceof Integer) return null;
-    }
-    
-    function Float  (width) { this.w = width; }
-    Float.prototype = new Type();
-    Float.prototype.cvt = function(from) {
-        if (from instanceof Float || from instanceof Integer) return null;
-    }
-    Float.prototype._bi = function(op, v2) {
-        if (v2 instanceof Float || v2 instanceof Integer) return { 
-            f : function(a, b) { return '(' + a + op + b + ')'; },
-            t : (this.w < v2.w) ? v2.typeName() : this.typeName()
+            };
+            stack.begin = function(section) {
+                var top = Object.create(null);
+                if (section) {
+                    if (section === true) this.unique = this.length;
+                    else top.$s = section;
+                }
+                this.push(top);
+            };
+            stack.define = function(name, value) {
+                var top = this.top();
+                if (top[name]) 
+                    return error('\'' + name + '\' already defined');
+                if (this.unique)
+                    for (var x = this.length - 2; x--; x >= this.unique)
+                        if (this[x][name])
+                            return error('\'' + name + '\' already defined');
+                top[name] = value;
+            };
+            return stack;
         };
-        error('Operator \'' + op + '\' wrong types.');
-    }
+        var stack = createStack();
+        var global = Object.create(null);
 
-    ////// Классы
-    function Class(name, type) {
-        this.tn = name;
-        this.t = type;
-        this.v = undefined;
-    }
-    Class.prototype = new Type();
-
-    ////// Шаблоны
-    function Template(params) {
-        this.b = params.body;
-        this.a = params.args;
-        this.n = params.name;
-    }
-    Template.prototype.inst = function(args) {
-        console.log('inst:', this.n, args.map(a => a.prototype.tn));
-        var body = this.b, imp;
-        begin();
-        try { 
-            imp = peg$parse(body, { handler : options.handler, startRule : "ClassDef" });
-        } catch(e) {
-            options.handler('', body, e);
-            return error('Instantiated here.');
-        }
-        var r = stack.pop();
-    }
-
-    ////// Function type
-
-    function Func(type, name, args) {
-        this.t = type;
-        this.n = name;
-        this.a = args;
-    }
-    Func.prototype = new Type();
-    Func.prototype.mangledName = function() { return [this.n].concat(this.a.map(function(a){ return a.t.prototype.tn; })).join('$')};
-    Func.prototype.match = function(a) {
-        var l1 = this.a.length, l2 = a.length;
-        if (l1 < l2) return false;
-        if (l1 > l2) for (var x = l2; x < l1; x++) if (typeof this.a[x].i !== 'undefined') return false;
-        for (var x = 0; x < l2; x++) {
-
-        }
-        return true;
-    };
-    Func.prototype.exec = function(args) {
-        var l = this.a ? this.a.length || 0 : 0;
-        if (!(args instanceof Array)) args = [args];
-        if (args.length != l) return error('Argument count mismatch.');
-        for (var x = 0; x < l; x++)
-            args[x] = (new this.a[x].t(args[x])).js();
-        var j = this.n + '(' + args.join(',') + ')';
-        return new this.t({ j : j });
-    };
-
-    function FuncSet(name) {
-        this.n = name;
-        this.f = [];
-    }
-
-    function Namespace(name) {
-        this.n = name;
-    }
-    //FuncSet.prototype.
-
-    function begin(section) {
-        var top = Object.create(null);
-        if (section) top.$s = section;
-        stack.push(top);
-    }
-    begin();
-
-    /////// Словарь типов  
-    function defineType(name, proto) {
-        var l = stack.length;
-        if (!l) return error("Stack is empty");
-        if (findType([name]))
-            return error("Type '" + name + "' redeclared.");
-
-        var type = function(v) { // Конструктор значений
-            this.init(v);
+        //////// Корневой класс для всех типов
+        function Type() { }
+        Type.prototype = {
+            typeName : function() { return this.tn; },
+            ptrOrder : function() { return this.p || 0; },
+            js       : function() { return this.j || this.c; },
+            isConst  : function() { return typeof this.c !== 'undefined'; },
+            init     : function(v, options) {
+                if (typeof v === 'string') { // Создаём переменную с заданным именем
+                    this.j = v;
+                    this.n = v;
+                } else if (v instanceof Type) {
+                    this.from(v);
+                } else {
+                    if (typeof v.c !== 'undefined') this.c = v.c; // нативное значение
+                    if (typeof v.j === 'string')    this.j = v.j; // значение из выражения js
+                }
+            },
+            from     : function(v) {
+                if (typeof this.cvt !== 'function')
+                    return error('Method cvt() not defined for type ' + this.typeName());
+                var f = this.cvt(v);
+                if (f === null) {
+                    if (v.isConst()) this.c = v.c; else this.j = v.j;
+                    return;
+                }
+                if (typeof f !== 'function')
+                    return error('Unable to convert \'' + v.typeName() + '\' to \'' + this.typeName() + '\': method undefined');
+                if (v.isConst())
+                    this.c = Function('$', f('$'))(v.c);
+                else
+                    this.j = f(v.j);
+            },
+            // бинарные операторы
+            bi : function(op, v2) {
+                if (typeof this._bi !== 'function')
+                    return error('Method _bi() not defined for type ' + this.typeName());
+                var b = this._bi(op, v2), type = b.t;
+                if (this.isConst() && v2.isConst()) {
+                    var c = Function('$1', '$2', b.f('$1', '$2'))(this.c, v2.c);
+                    return new type({ c : c });
+                } else {
+                    var j = b.f(this.js(), v2.js());
+                    return new type({ j : j });
+                }
+            }
         };
-        proto.tn = name;
-        type.prototype = proto;
-        stack[l - 1][name] = type;
-    }
-    function modifyType(type, modifiers) {
-        if(!modifiers.length) return type;
-        var proto = Object.create(type.prototype);
-        var newType = function(v) { this.init(v); };
-        proto.tn = type.prototype.tn;
-        newType.prototype = proto;
-        return newType;
-    }
-    
-    // Types: 
-    //   n - name
-    //   t - type i(nt), f(loat), b(ool), c(lass), s(struct), u(nion), v(oid), (functio)n
-    //   w - width, bytes
-    //   s - signed, bool
-    //   v - member vars
-    var types0 = Object.create(null);    
-    (function builtinTypes() {
-        defineType('void',   new Type());
-        defineType('bool',   new Bool());
-        var ispec = ['', 'signed ', 'unsigned '];
-        for (var x = 0; x < 3; x++) {
-            var is = ispec[x], s = x < 3;
-            defineType(is + 'char' , new Integer(1, s));
-            defineType(is + 'short', new Integer(2, s));
-            defineType(is + 'int'  , new Integer(4, s));
-            defineType(is + 'long' , new Integer(4, s));
+        function isType(t) { return t && t.prototype instanceof Type; }
+        /////// Скалярные типы
+        function Bool() {}
+        Bool.prototype = new Type();
+
+        function Integer(width, signed) { this.w = width; this.s = signed; }
+        Integer.prototype = new Type();
+        Integer.prototype.cvt = function(from) {
+            if (from instanceof Float) return function(a) { return '(' + a + '|0)'; }
+            if (from instanceof Integer) return null;
+        }
+        
+        function Float  (width) { this.w = width; }
+        Float.prototype = new Type();
+        Float.prototype.cvt = function(from) {
+            if (from instanceof Float || from instanceof Integer) return null;
+        }
+        Float.prototype._bi = function(op, v2) {
+            if (v2 instanceof Float || v2 instanceof Integer) return { 
+                f : function(a, b) { return '(' + a + op + b + ')'; },
+                t : (this.w < v2.w) ? v2.constructor : this.constructor
+            };
+            error('Operator \'' + op + '\' wrong types.');
         }
 
-        defineType('float',  new Float(4));
-        defineType('double', new Float(8));
-        for (var x in stack[0]) types0[x] = stack[0][x];
-    })();
-    function findVar(name) {
-        for (var x = stack.length - 1; x >= 0; x--) {
-            var scope = stack[x]; 
-            if (typeof scope[name] !== 'undefined')
-                return scope[name];
+        ////// Классы
+        function Class(name, type) {
+            this.tn = name;
+            this.t = type;
+            this.v = undefined;
         }
-    }
-    function defineFunction(func) {
-        //debugger;
-        if (!func instanceof Func) return error('Not function: ' + func);
-        var l = stack.length;
-        if (!l) return error('Stack is empty');
+        Class.prototype = new Type();
 
-        var v, name = func.n, mn = func.n;//mangledName();
-        if (global[mn] && global[mn].b && func.b) return error('Function \'' + name + '\' body redeclared.');
-        var fs = findVar(name);// || new FuncSet(name);
-        //console.log('defineFunction:', name);
-        if (fs) {
+        ////// Function type
 
-            //return error("Function '" + variable.n + "' redeclared.");
-        } else {
-            stack[l - 1][name] = func;
-            global[mn] = func;
+        function Func(type, name, args) {
+            this.t = type;
+            this.n = name;
+            this.a = args;
         }
-        //console.log('Defined function', name, func);
+        Func.prototype = new Type();
+        Func.prototype.mangledName = function() { return [this.n].concat(this.a.map(function(a){ return a.t.prototype.tn; })).join('$')};
+        Func.prototype.match = function(a) {
+            var l1 = this.a.length, l2 = a.length;
+            if (l1 < l2) return false;
+            if (l1 > l2) for (var x = l2; x < l1; x++) if (typeof this.a[x].i !== 'undefined') return false;
+            for (var x = 0; x < l2; x++) {
+
+            }
+            return true;
+        };
+        Func.prototype.exec = function(args) {
+            var l = this.a ? this.a.length || 0 : 0;
+            if (!(args instanceof Array)) args = [args];
+            if (args.length != l) return error('Argument count mismatch.');
+            for (var x = 0; x < l; x++)
+                args[x] = (new this.a[x].t(args[x])).js();
+            var j = this.n + '(' + args.join(',') + ')';
+            return new this.t({ j : j });
+        };
+
+        function FuncSet(name) {
+            this.n = name;
+            this.f = [];
+        }
+
+        function Namespace(name) {
+            this.n = name;
+        }
+        Namespace.prototype = {
+            scope : function(n) {
+                var r = this.v[n];
+                if (!r) return error('Identifier \'' + n + '\' not found in the namespace \'' + this.n + '\'');
+                return r;
+            }
+        };
+        stack.begin();
+
+        /////// Словарь типов
+        function makeType(name, proto) {
+            var type = function(v) { // Конструктор значений
+                this.init(v);
+            };
+            proto.tn = name;
+            type.prototype = proto;
+            return type;
+        }
+        function defineType(name, proto) {
+            var type = makeType(name, proto);
+            stack.define(name, type);
+            return type;
+        }
+        function modifyType(type, modifiers) {
+            if(!modifiers.length) return type;
+            var proto = Object.create(type.prototype);
+            var newType = function(v) { this.init(v); };
+            proto.tn = type.prototype.tn;
+            newType.prototype = proto;
+            return newType;
+        }
+        
+        // Types: 
+        //   n - name
+        //   t - type i(nt), f(loat), b(ool), c(lass), s(struct), u(nion), v(oid), (functio)n
+        //   w - width, bytes
+        //   s - signed, bool
+        //   v - member vars
+        var types0 = Object.create(null);    
+        (function builtinTypes() {
+            defineType('void',   new Type());
+            defineType('bool',   new Bool());
+            var ispec = ['', 'signed ', 'unsigned '];
+            for (var x = 0; x < 3; x++) {
+                var is = ispec[x], s = x < 3;
+                defineType(is + 'char' , new Integer(1, s));
+                defineType(is + 'short', new Integer(2, s));
+                defineType(is + 'int'  , new Integer(4, s));
+                defineType(is + 'long' , new Integer(4, s));
+            }
+
+            defineType('float',  new Float(4));
+            defineType('double', new Float(8));
+            for (var x in stack[0]) types0[x] = stack[0][x];
+        })();
+        function defineFunction(func) {
+            //debugger;
+            if (!func instanceof Func) return error('Not function: ' + func);
+            var l = stack.length;
+            if (!l) return error('Stack is empty');
+
+            var v, name = func.n, mn = func.n;//mangledName();
+            if (global[mn] && global[mn].b && func.b) return error('Function \'' + name + '\' body redeclared.');
+            var fs = stack.find(name);// || new FuncSet(name);
+            //console.log('defineFunction:', name);
+            if (fs) {
+
+                //return error("Function '" + variable.n + "' redeclared.");
+            } else {
+                stack[l - 1][name] = func;
+                global[mn] = func;
+            }
+            //console.log('Defined function', name, func);
+        }
+        var result = {
+            stack       : stack,
+            global      : global,
+            Namespace   : Namespace,
+            Class       : Class,
+            makeType    : makeType,
+            defineType  : defineType,
+            modifyType  : modifyType,
+            isType      : isType,
+            Template    : Template,
+            types0      : types0,
+            Func        : Func
+        }
+        ////// Шаблоны
+        function Template(params) {
+            this.b = params.body;
+            this.a = params.args;
+            this.n = params.name;
+            this.s = stack.length;
+        }
+        Template.prototype.inst = function(args) {
+            //console.log('inst:', this.n, args.map(a => a.prototype.tn));
+            var body = this.b, imp;
+            stack.begin();
+            var internal = {};
+            for (var x in result) if(result.hasOwnProperty(x)) {
+                if (x === 'stack') {
+                    var st = createStack();//stack.slice(0, this.s);
+                    for (var y = 0; y < this.s; y++) st[y] = stack[y];
+                    internal.stack = st;
+                } else internal[x] = result[x];
+            }
+            //debugger;
+            try { 
+                imp = peg$parse(body, { 
+                    handler   : options.handler,
+                    internal  : internal,
+                    startRule : "ClassDef" });
+            } catch(e) {
+                options.handler('', body, e);
+                return error('Instantiated here.');
+            }
+            //debugger;
+            var r = stack.pop();
+            return imp;
+        }
+
+        return result;
     }
-    function declVar(variable) {
-        var l = stack.length;
-        if (!l) return error('Stack is empty');
-        if (findVar(variable.n))
-            return error("Variable '" + variable.n + "' redeclared.");
-        if (stack[l - 1].$s) variable.s = stack[l - 1].s;
-        stack[l - 1][variable.n] = variable;
-    }
+    var declType, returnType, userType = [], className;
+    var $ = options.internal || initialize(), stack = $.stack, global = $.global, types0 = $.types0;
 }
 
 Unit = ws i:UnitItem* {
@@ -256,7 +284,7 @@ Unit = ws i:UnitItem* {
     return r.join('\n');
 }
 
-UnitItem = Function / FunctionPrototype / DeclarationStatement / TypedefStatement / ClassStatement / ClassTemplateStatement / Namespace ;
+UnitItem = Namespace / ClassTemplateStatement / ClassStatement / Function / FunctionPrototype / DeclarationStatement / TypedefStatement ;
 
 ////////// Namespaces
 
@@ -266,14 +294,15 @@ Namespace = NamespaceHead i:UnitItem* "}" ws {
 }
 
 NamespaceHead = "namespace" ws n:Identifier ws "{" ws {
-    var top = stack[stack.length - 1];
+    var top = stack.top();
     var ns = top[n];
     if (ns) {
+        if (!(ns instanceof $.Namespace)) return error('Not a namespace: \'' + n + '\'');
         stack.push(ns.v);
     } else {
-        top[n] = ns = new Namespace(n);
-        begin();
-        ns.v = stack[stack.length - 1];
+        top[n] = ns = new $.Namespace(n);
+        stack.begin();
+        ns.v = stack.top();
     }
 }
 
@@ -291,20 +320,21 @@ Function = h:FunctionStart c:CodeBlockBody {
     else if (c.d && c.d.length) js = js[0] + 'var ' + c.d.join(',') + ';' + js.substr(1);
     var a = h.a ? h.a.join(',') : '';
     returnType = undefined;
+    stack.unique = 0;
     return { j : '$.' + h.n + '=function ' + h.n + '(' + a + ')' + js + ';' };
 }
 
 FunctionStart = h:FunctionHead "{" ws {
     returnType = h.t;
-    begin();
+    stack.begin(true);
     if (h.a) for (var x in h.a) {
         var a = h.a[x];
-        declVar(a.n, a.t);
+        stack.define(a.n, new a.t(a.n));
     }
     return h;
 }
 
-FunctionHead = s:FunctionSpecifier? t:Type n:Identifier "(" ws a:ArgumentList? ")" ws { return new Func(t, n, a || [], s); }
+FunctionHead = s:FunctionSpecifier? t:Type n:Identifier "(" ws a:ArgumentList? ")" ws { return new $.Func(t, n, a || [], s); }
     FunctionSpecifier = "inline" ws { return 'i'; }
 
 ArgumentList = a1:Argument a:COMMAArgument* { return [a1].concat(a); }
@@ -331,7 +361,7 @@ CodeBlockBody = c:Statement* "}" ws {
 CodeBlockStub = "{" ws CBSItem* "}" ws ;
     CBSItem = CodeBlockStub / CharConst / StringConst / (!"}" .)
 
-CodeBlockStart = "{" ws { begin(); }
+CodeBlockStart = "{" ws { stack.begin(); }
 
 Statement = DeclarationStatement / CodeBlock / ExpressionStatement / TypedefStatement / ClassStatement / ReturnStatement ;
 
@@ -345,7 +375,7 @@ ReturnStatement = 'return' ws e:Expression ';' ws {
 DeclarationStatement       = SetType d:    DeclarationList ";" ws { return {j : d}; }
 MemberDeclarationStatement = SetType MemberDeclarationList ";" ws { return undefined; }
 
-SetType = t:Type { if (typeof t !== 'function' || !(t.prototype instanceof Type)) return error('Wrong type: ' + t); declType = t; }
+SetType = t:Type { if (!$.isType(t)) return error('Wrong type: ' + t); declType = t; }
 
 DeclarationList       = d:Declaration l: COMMADeclaration* { return d + l.join(); }
 MemberDeclarationList = DeclareVar COMMAMemberDeclaration* { return undefined; }
@@ -355,10 +385,9 @@ COMMAMemberDeclaration = COMMA DeclareVar    { return undefined; }
 
 Declaration = DeclareVar / DeclareInit ;
 
-DeclareVar = r:AMP? n:Identifier ![=] { declVar(new declType(n, { ref : r !== null })); return ''; }
+DeclareVar = r:AMP? n:Identifier ![=] { stack.define(n, new declType(n, { ref : r !== null })); return ''; }
 
-DeclareInit
-    = n:Identifier EQU e:Expression { declVar(new declType(n)); return n + '=' + (new declType(e)).js() + ';'; }
+DeclareInit = n:Identifier EQU e:Expression { stack.define(n, new declType(n)); return n + '=' + (new declType(e)).js() + ';'; }
 
 ////////// Expressions
 // t : c++ type (int32_t, uint32_t ...)
@@ -376,28 +405,35 @@ Expr15  = a:Expr2 o:EQU b:Expr15 { return a.bi(o, b); }
 Expr2   = f:Expr1 "(" ws e:Expression ")" ws { return f.exec(e); } 
         / Expr1 ;
 
-//Expr1 = a:Expr0 SCOPEOP b:Expr1 { return console.log(a, '::', b); }
+Expr1   = Const 
+        / Expr0 ;
 
-Expr1 = Variable / Const ;
+Expr0 = e:Entity q:Qualification* {
+            //console.log('e0:', e, ' q: ', q);
+            for (var x in q) {
+                var t = q[x];
+                e = (typeof t === 'string') ? e.scope(t) : e.inst(t);
+            }
+            //console.log('e0res:', e);
+            return e;
+        }
 
-/*Assign = l:LValue EQU r:RValue {
-    var v = r.j || r.c;
-    var js = (l.t == 'class') ? l.n + '["="](' + v + ')' : (l.n + '=' + v);
-    return { j : js, t : l.t };
-}*/
+Qualification = "::" ws i:Identifier  { return i; }
+              / TemplateParamList
 
-/*RValue = LValue / Const ;
+TemplateParamList = "<" ws l:TemplateParams ">" ws { return l; }
+    TemplateParams = p:TemplateParam l:COMMATemplateParam* { return [p].concat(l); }
+        COMMATemplateParam = COMMA p:TemplateParam { return p; }
+        TemplateParam = Type / Expression ;
 
-LValue = Variable ;*/
-
-Variable = n:Identifier { var v = findVar(n); if (v) return v; else error("Undeclared variable '" + n + "'."); }
+Entity = n:Identifier { var v = stack.find(n); if (v) return v; else error("Undeclared identifier '" + n + "'."); }
 
 ////////// Templates
 
 ClassTemplateStatement = a:ClassTemplateHead h:ClassHead b:$CodeBlockStub d:DeclarationList? ";" ws {
     var top = stack[stack.length - 1];
     if (top[h.n]) return error('Unable to define template with already used name: ' + h.n);
-    top[h.n] = new Template({
+    top[h.n] = new $.Template({
         name : h.n,
         args : a,
         body : h.t + ' ' + h.n + ' ' + b
@@ -413,24 +449,24 @@ ClassTemplateStatement = a:ClassTemplateHead h:ClassHead b:$CodeBlockStub d:Decl
 
 ////////// Classes and structures
 
-ClassStatement = c:ClassDef d:DeclarationList? ";" ws { return { j : c + (d || '') }; };
+ClassStatement = c:SetClassDef d:DeclarationList? ";" ws { return { j : c + (d || '') }; };
 
+    SetClassDef = t:ClassDef { declType = t; }
     ClassDef = t:ClassDefStart ClassMember* "}" ws {
-        var data = stack.pop();
-        return 'function ' + t.tn + '(){}';
+        stack.pop();
+        return t;
     }
         ClassDefStart = h:ClassHead "{" ws {
-            var type = new Class(h.n, h.t);
-            defineType(h.n, type);
-            begin((h.t === 'class') ? 'pri' : 'pub');
-            type.v = stack[stack.length - 1];
+            var type = $.defineType(h.n, new $.Class(h.n, h.t));
+            stack.begin((h.t === 'class') ? 'pri' : 'pub');
+            type.prototype.v = stack.top();
             className = h.n;
             return type;
         }
             ClassHead = t:("class" / "struct") ws n:Identifier { return { t : t, n : n }; }
 
-        ClassMember = MemberConstructorProto / MemberConstructorDef / MemberDestructorProto / MemberDestructorDef 
-            / MemberMethodDef / MemberMethodProto / ClassSection / MemberDeclarationStatement ;
+        ClassMember = ClassSection / MemberConstructorProto / MemberConstructorDef / MemberDestructorProto / MemberDestructorDef 
+                    / MemberMethodDef / MemberMethodProto / MemberDeclarationStatement ;
 
             MemberDestructorProto  = "~" ws a:MemberConstructorHead ";" ws ;
             MemberConstructorProto = a:MemberConstructorHead ";" ws ;
@@ -444,7 +480,7 @@ ClassStatement = c:ClassDef d:DeclarationList? ";" ws { return { j : c + (d || '
                     COMMAConstructorInit = "," ws i:ConstructorInit { return i; }
 
             MemberMethodDef = h:MethodHead c:CONST? b:$CodeBlockStub { console.log(h, b); }
-                MethodHead = s:MethodSpecifier? t:Type n:Identifier "(" ws a:ArgumentList? ")" ws { return new Func(t, n, a || [], s); }
+                MethodHead = s:MethodSpecifier? t:Type n:Identifier "(" ws a:ArgumentList? ")" ws { return new $.Func(t, n, a || [], s); }
                     MethodSpecifier = FunctionSpecifier / "virtual" ws { return 'v'; } / "static" ws { return 's'; }
 
             ClassSection = s:(PRIVATE / PROTECTED / PUBLIC) ":" ws { stack[stack.length - 1].$s = s; }
@@ -459,9 +495,9 @@ TypedefStatement = TYPEDEF SetType TypedefList ';' ws {}
 TypedefList = n:TypedefName l:COMMATypedefName* { return n + l.join(); }
 
     COMMATypedefName = COMMA n:TypedefName {return n}
-    TypedefName = n:Identifier { defineType(n, declType); }
+    TypedefName = n:Identifier { $.defineType(n, declType); }
 
-Type = c1:TypeSpec* t:(VOID / BOOL / Integer / FLOAT / DOUBLE / UserType) c2:TypeSpec* { return modifyType(t, c1.concat(c2)); }
+Type = c1:TypeSpec* t:(VOID / BOOL / Integer / FLOAT / DOUBLE / UserType) c2:TypeSpec* { return $.modifyType(t, c1.concat(c2)); }
 
 TypeSpec = CONST / VOLATILE ;
 
@@ -481,19 +517,16 @@ SignSpec = SIGNED / UNSIGNED ;
 SIGNED   = a:"signed"   ws { return a; }
 UNSIGNED = a:"unsigned" ws { return a; }
 
-UserType = !Keyword s:TypeScope* i:Identifier &{ var ut = findType(s.concat(i)); if (ut) userType.push(ut); return ut; } p:TemplateParams? {
-    var ut = userType.pop();
-    if (p && !(ut instanceof Template)) return error('\'' + i + '\' is not template');
-    if (!p && ut instanceof Template) return error('Required template parameters for \'' + i + '\'');
-    return p ? ut.inst(p) : ut;
+UserType = t:Expr0 &{
+    if ($.isType(t)) {
+        userType.push(t);
+        return t;
+    } 
+} {
+    return userType.pop();
 }
 
-    TypeScope = i:Identifier SCOPEOP { return i; }
-
-TemplateParams = "<" ws l:TemplateParamList ">" ws { return l || []; }
-    TemplateParamList = p:TemplateParam l:COMMATemplateParam* { return [p].concat(l); }
-        COMMATemplateParam = COMMA p:TemplateParam { return p; }
-        TemplateParam = Type / Expression ;
+FindName = i:Identifier { stack.find(i); }
 
 ////////// Literals
 
@@ -546,7 +579,7 @@ TYPENAME = a:"typename" ws { return a; }
 
 Keyword = ( "auto" / "break" / "case" / "char" / "const" / "continue" / "default" / "double" / "do" / "else" / "enum" / "extern" / "float"
       / "for" / "goto" / "if" / "int" / "inline" / "long" / "register" / "restrict" / "return" / "short" / "signed" / "sizeof" / "static"
-      / "struct" / "switch" / "typedef" / "union" / "unsigned" / "void" / "volatile" / "while" / "_Bool" / "_Complex" / "_Imaginary"
+      / "struct" / "class" / "switch" / "typedef" / "union" / "unsigned" / "void" / "volatile" / "while" / "_Bool" / "_Complex" / "_Imaginary"
       / "_stdcall" / "__declspec" / "__attribute__" / "namespace" / "using" / "true" / "false"
     ) !IdChar ;
 

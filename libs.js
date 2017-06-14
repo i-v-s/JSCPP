@@ -21,8 +21,13 @@ class map {}; \n\
 }\n\
 #endif';
 libs['iostream'            ] = '';
-libs['fstream'             ] = '';
-
+libs['fstream'             ] = '\
+#ifndef _fSTREAM_ \n\
+#define _fSTREAM_ \n\
+namespace std { \n\
+class ofstream {}; \n\
+}\n\
+#endif';
 libs['stdint.h'            ] = '';
 libs['stdio.h'             ] = '';
 libs['math.h'              ] = '';
