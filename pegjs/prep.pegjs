@@ -1,11 +1,14 @@
 {
     var defs = options.defs || Object.create(null), incLoc = options.incLoc || Object.create(null), incLib = options.incLib || Object.create(null);
     var en = true, stack = [], handler = options.handler || function() {}, def;
+    function findName(def) {
+        for (var x in defs) if (defs[x] === def) return x;
+    }
     function include(file, lib) {
         var inc = (lib ? incLib : incLoc)[file];
 
         if (typeof inc === 'string') try { 
-            return peg$parse(inc, { defs : defs, incLoc : incLoc, incLib : incLib }).result;
+            return peg$parse(inc, { defs : defs, incLoc : incLoc, incLib : incLib, handler : handler }).result;
         } catch(e) {
             handler(file, inc, e);
             return error('Included here.');
@@ -29,8 +32,8 @@
 ////////// Unit of code
 
 Unit = i:Item l:Lines { return { 
-    defs   : defs, 
-    incLoc : getAbsent(incLoc), 
+    defs   : defs,
+    incLoc : getAbsent(incLoc),
     incLib : getAbsent(incLib),
     result : i + '\n' + l
 }; }
@@ -85,7 +88,7 @@ Const = DecimalConst / OctalConst ;
 
 CodeLine = s:is !"#" i:CodeItem* { return s + i.join(''); }
 
-CodeItem = !"\n" i:(LineComment / LongComment / LineAdd / String / Char / DefConst / nn) { return i; }
+CodeItem = !"\n" i:(LineComment / LongComment / LineAdd / String / Char / DefConst / DefFunc / nn) { return i; }
 
 LineAdd = "\\" is "\n" { return ''; }
 
@@ -93,15 +96,21 @@ LineAdd = "\\" is "\n" { return ''; }
 
 DefConst = d:Def &{ return !d.a; } { return d.v; }
 
-/*DefFunc  = d:Def &{ return d.a; } "(" ws c:Code a:("," ws Code)* ")" w2:ws {
-    if (defs[i] && defs[i].a) {
-        console.log();
-    } else
-        return i + '(' + w1 + c + a.join('') + ')' + w2;
-}*/
+DefFunc  = d:Def &{ return d.a; } "(" ws a:DefArgs ")" w2:is {
+    var v = d.v;
+    for (var x in a) if(d.a[x]) v = v.replace(d.a[x], a[x]);
+    // console.log('Replace \'' + findName(d) + '(' + a.join(', ') + ')\' by \'' + v + '\'');
+    return v;
+}
+
+DefArgs = f:CodeBlockUC l:COMMACodeBlockUC* { return [f].concat(l); }
+    CodeBlockUC = i:CBItemUC* { return i.join(''); }
+        COMMACodeBlockUC = "," s:ws c:CodeBlockUC { return s + c; }
+            CBItemUC = CodeBlock / Char / String / DefConst / DefFunc / CBSymbolUC
+                CBSymbolUC = !")" !"," s:. { return s; }
 
 CodeBlock = "(" s1:ws i:CBItem* ")" s2:ws { return s1 + i.join('') + s2; }
-    CBItem = CodeBlock / Char / String / DefConst / /*DefFunc /*/ (!")" .)
+    CBItem = CodeBlock / Char / String / DefConst / DefFunc / (!")" .)
 
 Def = i:Identifier &{ return def = defs[i]; } { return def; }
 

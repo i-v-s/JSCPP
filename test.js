@@ -95,7 +95,7 @@ function preprocessor(input, fileName, options) {
 var fn = 'feature_alignment.cpp';
 var cpp = fs.readFileSync(fn, 'utf8');
 
-preprocessor(cpp, fn, { incLib : libs }).then(cpp => {
+preprocessor(cpp, fn, { incLib : libs, handler : handler }).then(cpp => {
     console.log(cpp);
     var code = parse(cpp, fn, parser, { handler : handler });
     console.log(code);
