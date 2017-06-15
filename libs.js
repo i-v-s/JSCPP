@@ -28,20 +28,34 @@ namespace std { \n\
 class ofstream {}; \n\
 }\n\
 #endif';
-libs['stdint.h'            ] = '';
+libs['stdint.h'            ] = '\
+typedef unsigned char uint8_t; \n\
+';
 libs['stdio.h'             ] = '';
 libs['math.h'              ] = '';
 libs['unistd.h'            ] = '';
 libs['sys/time.h'          ] = 'struct timeval { long tv_sec; long tv_usec; };';
 
 libs['Eigen/Core'          ] = '\
-namespace Eigen {} \n\
+namespace Eigen { \n\
+class Vector2f {}; \n\
+class Vector3f {}; \n\
+} \n\
 ';
 libs['Eigen/StdVector'     ] = '\
 #define EIGEN_DEFINE_STL_VECTOR_SPECIALIZATION(x) \n\
 ';
-libs['opencv2/opencv.hpp'  ] = '';
+libs['opencv2/opencv.hpp'  ] = '\
+namespace cv { \n\
+class Mat {}; \n\
+} \n\
+';
 libs['sophus/se3.h'        ] = '\
 namespace Sophus {} \n\
 ';
-libs['boost/shared_ptr.hpp'] = '';
+libs['boost/shared_ptr.hpp'] = '\
+namespace boost { \n\
+template<class T> \n\
+class shared_ptr{}; \n\
+} \n\
+';

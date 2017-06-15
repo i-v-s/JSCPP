@@ -284,22 +284,23 @@
     var $ = options.internal || initialize(), stack = $.stack, global = $.global, types0 = $.types0;
 }
 
-Unit = ws i:UnitItem* {
+Unit = ws i:UnitItems {
     var vars = stack[0], varNames = [], r = [];
     for (var x in vars) if (x !== '$s') varNames.push(x);
     if (varNames.length) r.push('var ' + varNames.join(',') + ';');
-    for(var x in i) if (i[x].j) r.push(i[x].j);
+    r.push(i);
     return r.join('\n');
 }
 
-UnitItem = Namespace / UsingNamespaceStatement / ClassTemplateStatement / ClassStatement / Function / FunctionPrototype / DeclarationStatement / TypedefStatement ;
+UnitItems = i:UnitItem* { return { j : i.filter(i => i).map(i => i.j).join('\n') }; }
+
+UnitItem = Namespace / UsingNamespaceStatement
+         / ClassTemplateStatement / ClassPrototype / ClassStatement 
+         / Function / FunctionPrototype / DeclarationStatement / TypedefStatement ;
 
 ////////// Namespaces
 
-Namespace = NamespaceHead i:UnitItem* "}" ws {
-    stack.pop();
-    return { j : i.map(function(i){ return i.j; }).join('\n') };
-}
+Namespace = NamespaceHead i:UnitItems "}" ws { stack.pop(); return i; }
 
 NamespaceHead = "namespace" ws n:Identifier ws "{" ws {
     var top = stack.top();
@@ -467,7 +468,11 @@ ClassTemplateStatement = a:ClassTemplateHead h:ClassHead b:$CodeBlockStub d:Decl
 
 ////////// Classes and structures
 
-ClassStatement = c:SetClassDef d:DeclarationList? ";" ws { return { j : c + (d || '') }; };
+ClassPrototype = h:ClassHead ";" ws {
+    $.defineType(h.n, new $.Class(h.n, h.t));
+}
+
+ClassStatement = c:SetClassDef d:DeclarationList? ";" ws { return { j : c + (d || '') }; }
 
     SetClassDef = t:ClassDef { declType = t; }
     ClassDef = t:ClassDefStart ClassMember* "}" ws {
