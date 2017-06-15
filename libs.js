@@ -34,10 +34,14 @@ libs['math.h'              ] = '';
 libs['unistd.h'            ] = '';
 libs['sys/time.h'          ] = 'struct timeval { long tv_sec; long tv_usec; };';
 
-libs['Eigen/Core'          ] = '';
+libs['Eigen/Core'          ] = '\
+namespace Eigen {} \n\
+';
 libs['Eigen/StdVector'     ] = '\
 #define EIGEN_DEFINE_STL_VECTOR_SPECIALIZATION(x) \n\
 ';
 libs['opencv2/opencv.hpp'  ] = '';
-libs['sophus/se3.h'        ] = '';
+libs['sophus/se3.h'        ] = '\
+namespace Sophus {} \n\
+';
 libs['boost/shared_ptr.hpp'] = '';

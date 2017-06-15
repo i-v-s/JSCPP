@@ -6,8 +6,12 @@
             stack.unique = 0;
             stack.find = function(name) {
                 for (var x = this.length - 1; x >= 0; x--) {
-                    var item = this[x][name];
+                    var s = this[x], item = s[name];
                     if (item) return item;
+                    for (var y in s.$u) {
+                        item = s.$u[y].scope(name);
+                        if (item) return item;                        
+                    }
                 }
             };
             stack.begin = function(section) {
@@ -16,6 +20,7 @@
                     if (section === true) this.unique = this.length;
                     else top.$s = section;
                 }
+                top.$u = []; // using namespace
                 this.push(top);
             };
             stack.define = function(name, value) {
@@ -152,7 +157,10 @@
         Namespace.prototype = {
             scope : function(n) {
                 var r = this.v[n];
-                if (!r) return error('Identifier \'' + n + '\' not found in the namespace \'' + this.n + '\'');
+                if(!r && this.v.$u) for (var x in this.v.$u) {
+                    var t = this.v.$u[x].scope(n);
+                    if (t) return t;
+                }
                 return r;
             }
         };
@@ -284,7 +292,7 @@ Unit = ws i:UnitItem* {
     return r.join('\n');
 }
 
-UnitItem = Namespace / ClassTemplateStatement / ClassStatement / Function / FunctionPrototype / DeclarationStatement / TypedefStatement ;
+UnitItem = Namespace / UsingNamespaceStatement / ClassTemplateStatement / ClassStatement / Function / FunctionPrototype / DeclarationStatement / TypedefStatement ;
 
 ////////// Namespaces
 
@@ -304,6 +312,12 @@ NamespaceHead = "namespace" ws n:Identifier ws "{" ws {
         stack.begin();
         ns.v = stack.top();
     }
+}
+
+UsingNamespaceStatement = "using" ws "namespace" ws n:Identifier ";" ws {
+    var ns = stack.find(n);
+    if (!(ns instanceof $.Namespace)) return error('\'' + n + '\' is not a namespace');
+    stack.top().$u.push(ns);
 }
 
 ////////// Functions
@@ -412,7 +426,11 @@ Expr0 = e:Entity q:Qualification* {
             //console.log('e0:', e, ' q: ', q);
             for (var x in q) {
                 var t = q[x];
-                e = (typeof t === 'string') ? e.scope(t) : e.inst(t);
+                if (typeof t === 'string') {
+                    var r = e.scope(t);
+                    if (!r) return error('Identifier \'' + t + '\' not found in the namespace \'' + e.n + '\'');
+                    e = r;
+                } else e = e.inst(t);
             }
             //console.log('e0res:', e);
             return e;
