@@ -46,6 +46,7 @@
             js       : function() { return this.j || this.c; },
             isConst  : function() { return typeof this.c !== 'undefined'; },
             init     : function(v, options) {
+                if (typeof v === 'undefined') return;
                 if (typeof v === 'string') { // Создаём переменную с заданным именем
                     this.j = v;
                     this.n = v;
@@ -57,9 +58,12 @@
                 }
             },
             from     : function(v) {
-                if (typeof this.cvt !== 'function')
-                    return error('Method cvt() not defined for type ' + this.typeName());
-                var f = this.cvt(v);
+                var f = null;
+                if (v.constructor !== this.constructor) {
+                    if (typeof this.cvt !== 'function')
+                        return error('Method cvt() not defined for type ' + this.typeName());
+                    f = this.cvt(v);
+                }
                 if (f === null) {
                     if (v.isConst()) this.c = v.c; else this.j = v.j;
                     return;
@@ -231,6 +235,15 @@
             }
             //console.log('Defined function', name, func);
         }
+        function exec(expr, ops) {
+            for (var x in ops) {
+                var op = ops[x];
+                switch (op[0]) {
+
+                }
+            }
+            return expr;
+        }
         var result = {
             stack       : stack,
             global      : global,
@@ -238,11 +251,13 @@
             Class       : Class,
             makeType    : makeType,
             defineType  : defineType,
+            defineFunction : defineFunction,
             modifyType  : modifyType,
             isType      : isType,
             Template    : Template,
             types0      : types0,
-            Func        : Func
+            Func        : Func,
+            exec        : exec
         }
         ////// Шаблоны
         function Template(params) {
@@ -281,7 +296,7 @@
         return result;
     }
     var declType, returnType, userType = [], className;
-    var $ = options.internal || initialize(), stack = $.stack, global = $.global, types0 = $.types0;
+    var $ = options.internal || initialize(), stack = $.stack, global = $.global, types0 = $.types0, exec = $.exec;
 }
 
 Unit = ws i:UnitItems {
@@ -324,7 +339,7 @@ UsingNamespaceStatement = "using" ws "namespace" ws n:Identifier ";" ws {
 ////////// Functions
 
 FunctionPrototype = h:FunctionHead ";" ws {
-    defineFunction(h);
+    $.defineFunction(h);
     var name = h.n;//mangledName();
     return { j : 'var ' + name + '=$.' + name + ';' };
 }
@@ -356,9 +371,11 @@ ArgumentList = a1:Argument a:COMMAArgument* { return [a1].concat(a); }
 
 COMMAArgument = "," ws a:Argument { return a; }
 
-Argument = t:Type r:AMP? n:Identifier? i:ArgumentInitializer? {
+Argument = t:Type p:PtrQual* r:AMP? n:Identifier? i:ArgumentInitializer? {
     return {n : n, t : t, i : i, r : r !== null};
 }
+
+PtrQual = STAR q:CONST? { return q; }
 
 ArgumentInitializer = EQU c:Const { return c; }
 
@@ -378,13 +395,24 @@ CodeBlockStub = "{" ws CBSItem* "}" ws ;
 
 CodeBlockStart = "{" ws { stack.begin(); }
 
-Statement = DeclarationStatement / CodeBlock / ExpressionStatement / TypedefStatement / ClassStatement / ReturnStatement ;
+Statement = ReturnStatement / ForStatement / IfStatement / TypedefStatement / ClassStatement / DeclarationStatement / CodeBlock / ExpressionStatement ;
 
 ReturnStatement = 'return' ws e:Expression ';' ws { 
     var ec = new returnType(e); 
     return { j : 'return ' + (ec.j || ec.c) + ';' };
 }
 
+PopStatement = CodeBlockBodyS / ExpressionStatementS ;
+    CodeBlockBodyS = "{" ws c:CodeBlockBody { return c; }
+    ExpressionStatementS = s:ExpressionStatement { stack.pop(); return s; }
+
+ForStatement = For i:(DeclarationStatement / ExpressionStatement) c:Expression ";" f:Expression ")" ws s:PopStatement {
+    return s;
+}
+    For = "for" ws "(" ws { stack.begin(); }
+
+IfStatement = If e:(DeclarationStatement / ExpressionStatement) ")" ws s:PopStatement { return s; }
+    If = "if" ws "(" ws { stack.begin(); }
 ////////// Variable declarations
 
 DeclarationStatement       = SetType d:    DeclarationList ";" ws { return {j : d}; }
@@ -392,17 +420,19 @@ MemberDeclarationStatement = SetType MemberDeclarationList ";" ws { return undef
 
 SetType = t:Type { if (!$.isType(t)) return error('Wrong type: ' + t); declType = t; }
 
-DeclarationList       = d:Declaration l: COMMADeclaration* { return d + l.join(); }
-MemberDeclarationList = DeclareVar COMMAMemberDeclaration* { return undefined; }
+DeclarationList       = d:DeclareVar l: COMMADeclaration* { return d + l.join(); }
+MemberDeclarationList = MemberDeclareVar COMMAMemberDeclaration* { return undefined; }
 
-COMMADeclaration       = COMMA d:Declaration { return d; }
-COMMAMemberDeclaration = COMMA DeclareVar    { return undefined; }
+COMMADeclaration       = COMMA d:DeclareVar { return d; }
+COMMAMemberDeclaration = COMMA MemberDeclareVar { return undefined; }
 
-Declaration = DeclareVar / DeclareInit ;
+VarDef = p:PtrQual* r:AMP? n:Identifier a:ArrayBrackets? { stack.define(n, new declType(n, { ref : r !== null, ptr : p })); return n; }
+MemberDeclareVar = VarDef {  return ''; }
 
-DeclareVar = r:AMP? n:Identifier ![=] { stack.define(n, new declType(n, { ref : r !== null })); return ''; }
+DeclareVar = n:VarDef i:Initializer? { return i ? n + '=' + (new declType(i)).js() + ';' : ''; }
 
-DeclareInit = n:Identifier EQU e:Expression { stack.define(n, new declType(n)); return n + '=' + (new declType(e)).js() + ';'; }
+ArrayBrackets = "[" ws e:Expression "]" ws { return e; }
+Initializer = EQU e:Expression { return e; }
 
 ////////// Expressions
 // t : c++ type (int32_t, uint32_t ...)
@@ -414,11 +444,32 @@ ExpressionStatement = e:Expression ";" ws { return { j : e.js() + ';' }; }
 
 Expression = Expr15 ;// Assign / RValue;
 
-Expr15  = a:Expr2 o:EQU b:Expr15 { return a.bi(o, b); } 
-        / Expr2 ;
+Expr15  = a:Expr8 o:EQU b:Expr15 { return a.bi(o, b); } 
+        / Expr8 ;
 
-Expr2   = f:Expr1 "(" ws e:Expression ")" ws { return f.exec(e); } 
-        / Expr1 ;
+Expr8   = e:Expr7 o:Expr8post* { return exec(e, o); }
+    Expr8post = o:( ">" / "<" / ">=" / "<=" ) ws e:Expr7 { return [o, e]; }
+
+Expr7 = Expr6 ;
+
+Expr6   = e:Expr5 o:Expr6post* { return exec(e, o); }
+    Expr6post = o:( "+" / "-" ) ws e:Expr5 { return [o, e]; }
+
+Expr5   = e:Expr3 o:Expr5post* { return exec(e, o); }
+    Expr5post = o:( "*" / "/" / "%" ) ws e:Expr3 { return [o, e]; }
+
+Expr3   = o:Expr3pre* e:Expr2 { return exec(e, o); }
+
+    Expr3pre  = o:( "++" / "--" / "+" / "-" / "!" / "~" / "*" / "&" / "sizeof" ) ws { return [o]; }
+              / "(" ws e:Expression ")" ws { return [e]; }
+
+Expr2   = e:Expr1 o:Expr2post* { return exec(e, o); }
+
+    Expr2post = "("  ws e:Expression? ")" ws { return ['()', e]; }
+              / "["  ws e:Expression  "]" ws { return ['[]', e]; }
+              / "."  ws i:Identifier         { return ['.',  i]; }
+              / "->" ws i:Identifier         { return ['->', i]; }
+              / o:("++" / "--") ws           { return [o, true]; }
 
 Expr1   = Const 
         / Expr0 ;
@@ -518,11 +569,16 @@ TypedefStatement = TYPEDEF SetType TypedefList ';' ws {}
 TypedefList = n:TypedefName l:COMMATypedefName* { return n + l.join(); }
 
     COMMATypedefName = COMMA n:TypedefName {return n}
-    TypedefName = n:Identifier { $.defineType(n, declType); }
+    TypedefName = n:Identifier { $.defineType(n, new declType()); }
 
 Type = c1:TypeSpec* t:(VOID / BOOL / Integer / FLOAT / DOUBLE / UserType) c2:TypeSpec* { return $.modifyType(t, c1.concat(c2)); }
 
-TypeSpec = CONST / VOLATILE ;
+TypeSpec = CONST / VOLATILE / __ATTRIBUTE__;
+
+__ATTRIBUTE__ = "__attribute__" ws BracketStub { }
+
+BracketStub = "(" ws BSItem* ")" ws { }
+    BSItem = BracketStub / !")" . ;
 
 VOID    = "void"   ws { return types0['void'  ]; }
 BOOL    = "bool"   ws { return types0['bool'  ]; }
@@ -553,7 +609,9 @@ FindName = i:Identifier { stack.find(i); }
 
 ////////// Literals
 
-Const = FloatConst / DecimalConst / OctalConst ;
+Const = FloatConst / DecimalConst / OctalConst / BoolConst;
+
+BoolConst = b:("true" / "false") ws { return new types0['bool']({ c: b === "true" }); }
 
 DecimalConst = a:[1-9] b:[0-9]* { return new types0['int']({ c: parseInt(  a + b.join(''))}); }
 OctalConst   =     "0" a:[0-7]* { return new types0['int']({ c: parseInt('0' + a.join(''), 8)}); }

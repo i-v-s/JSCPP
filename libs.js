@@ -38,8 +38,13 @@ libs['sys/time.h'          ] = 'struct timeval { long tv_sec; long tv_usec; };';
 
 libs['Eigen/Core'          ] = '\
 namespace Eigen { \n\
-class Vector2f {}; \n\
-class Vector3f {}; \n\
+    class Vector2f {}; \n\
+    class Vector3f {}; \n\
+    class Vector2d {}; \n\
+    class Vector3d {}; \n\
+    class Matrix2f {   \n\
+        void setZero() {} \n\
+    };  \n\
 } \n\
 ';
 libs['Eigen/StdVector'     ] = '\

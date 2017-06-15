@@ -96,7 +96,10 @@ var fn = 'feature_alignment.cpp';
 var cpp = fs.readFileSync(fn, 'utf8');
 
 preprocessor(cpp, fn, { incLib : libs, handler : handler }).then(cpp => {
-    console.log(cpp);
+    //console.log(cpp);
+    for(var x = 0; x < 7; x++)
+        cpp = cpp.replace(/\n *\n *\n/g, '\n\n');
+    fs.writeFileSync('source.cpp', cpp);
     var code = parse(cpp, fn, parser, { handler : handler });
     console.log(code);
 });
