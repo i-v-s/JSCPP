@@ -406,7 +406,7 @@ PopStatement = CodeBlockBodyS / ExpressionStatementS ;
     CodeBlockBodyS = "{" ws c:CodeBlockBody { return c; }
     ExpressionStatementS = s:ExpressionStatement { stack.pop(); return s; }
 
-ForStatement = For i:(DeclarationStatement / ExpressionStatement) c:Expression ";" f:Expression ")" ws s:PopStatement {
+ForStatement = For i:(DeclarationStatement / ExpressionStatement) c:Expression ";" ws f:Expression ")" ws s:PopStatement {
     return s;
 }
     For = "for" ws "(" ws { stack.begin(); }
@@ -442,13 +442,18 @@ Initializer = EQU e:Expression { return e; }
 
 ExpressionStatement = e:Expression ";" ws { return { j : e.js() + ';' }; }
 
-Expression = Expr15 ;// Assign / RValue;
+Expression = Expr17;
+
+Expr17  = a:Expr16 o:COMMAExpr16* { return o.length ? [a].concat(o) : a; }
+    COMMAExpr16 = COMMA e:Expr16 { return e; }
+
+Expr16  = Expr15 ;
 
 Expr15  = a:Expr8 o:EQU b:Expr15 { return a.bi(o, b); } 
         / Expr8 ;
 
 Expr8   = e:Expr7 o:Expr8post* { return exec(e, o); }
-    Expr8post = o:( ">" / "<" / ">=" / "<=" ) ws e:Expr7 { return [o, e]; }
+    Expr8post = o:( ">=" / "<=" / ">" / "<" ) ws e:Expr7 { return [o, e]; }
 
 Expr7 = Expr6 ;
 
