@@ -447,21 +447,26 @@ Expression = Expr17;
 Expr17  = a:Expr16 o:COMMAExpr16* { return o.length ? [a].concat(o) : a; }
     COMMAExpr16 = COMMA e:Expr16 { return e; }
 
-Expr16  = Expr15 ;
+Expr16  = "throw" ws e:Expr15 { return $.throw(e); }
+        / Expr15 ;
 
-Expr15  = a:Expr8 o:EQU b:Expr15 { return a.bi(o, b); } 
+Expr15  = a:Expr8 o:("=" !"=" / "+=" / "-=" / "*=" / "/=" / "%=" / "<<=" / ">>=" / "&=" / "^=" / "|=" ) ws b:Expr15 { return a.bi(o, b); } 
         / Expr8 ;
 
 Expr8   = e:Expr7 o:Expr8post* { return exec(e, o); }
     Expr8post = o:( ">=" / "<=" / ">" / "<" ) ws e:Expr7 { return [o, e]; }
 
-Expr7 = Expr6 ;
+Expr7 = e:Expr6 o:Expr7post* { return exec(e, o); }
+    Expr7post = o:( "<<" !"=" / ">>" !"=" ) ws e:Expr6 { return [o, e]; }
 
 Expr6   = e:Expr5 o:Expr6post* { return exec(e, o); }
     Expr6post = o:( "+" / "-" ) ws e:Expr5 { return [o, e]; }
 
-Expr5   = e:Expr3 o:Expr5post* { return exec(e, o); }
-    Expr5post = o:( "*" / "/" / "%" ) ws e:Expr3 { return [o, e]; }
+Expr5   = e:Expr4 o:Expr5post* { return exec(e, o); }
+    Expr5post = o:( "*" / "/" / "%" ) ws e:Expr4 { return [o, e]; }
+
+Expr4   = e:Expr3 o:Expr4post* { return exec(e, o); }
+    Expr4post = o:( ".*" / "->*" ) ws e:Expr3 { return [o, e]; }
 
 Expr3   = o:Expr3pre* e:Expr2 { return exec(e, o); }
 
